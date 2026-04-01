@@ -15,6 +15,7 @@ import { useAuth } from '../context/AuthContext';
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import * as Brightness from 'expo-brightness';
+import { Logo } from '../components/Logo';
 
 export default function QRCodeScreen() {
   const router = useRouter();
@@ -113,9 +114,7 @@ export default function QRCodeScreen() {
         {/* QR Code Card */}
         <View style={styles.qrCard}>
           <View style={styles.qrHeader}>
-            <View style={styles.logoSmall}>
-              <Text style={styles.logoText}>›</Text>
-            </View>
+            <Logo size={32} showWordmark={false} />
             <Text style={styles.qrTitle}>My Coupons</Text>
           </View>
 
@@ -235,20 +234,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
-  },
-  logoSmall: {
-    width: 32,
-    height: 32,
-    backgroundColor: Colors.navy,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  logoText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: Typography.weightBold,
+    gap: 8,
   },
   qrTitle: {
     fontSize: 20,

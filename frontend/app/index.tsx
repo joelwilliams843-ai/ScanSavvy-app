@@ -49,7 +49,7 @@ export default function Index() {
           transform: [{ scale: scaleAnim }],
         }}
       >
-        <Logo size="large" showWordmark={false} />
+        <Logo size={80} showWordmark={false} />
       </Animated.View>
     </View>
   );

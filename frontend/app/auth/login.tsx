@@ -51,7 +51,7 @@ export default function Login() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoContainer}>
-          <Logo size="medium" />
+          <Logo size={40} />
         </View>
 
         <Text style={styles.heading}>Welcome back</Text>

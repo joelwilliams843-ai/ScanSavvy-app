@@ -53,7 +53,7 @@ export default function Signup() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.logoContainer}>
-          <Logo size="medium" />
+          <Logo size={40} />
         </View>
 
         <Text style={styles.heading}>Create your account</Text>
