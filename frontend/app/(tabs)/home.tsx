@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,18 +15,65 @@ import { CouponCard } from '../../components/CouponCard';
 import { useAuth } from '../../context/AuthContext';
 import { MOCK_COUPONS, COMMUNITY_STATS, MOCK_ACTIVITY } from '../../constants/MockData';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import { api } from '../../lib/api';
 
 export default function Home() {
   const router = useRouter();
   const { user } = useAuth();
   const [refreshing, setRefreshing] = React.useState(false);
-  const [showNearbyStore, setShowNearbyStore] = React.useState(true);
+  const [nearbyStore, setNearbyStore] = React.useState<any>(null);
+  const [loadingLocation, setLoadingLocation] = React.useState(false);
 
   const onRefresh = React.useCallback(() => {
     setRefreshing(true);
+    fetchNearbyStores();
     setTimeout(() => {
       setRefreshing(false);
     }, 1000);
+  }, []);
+
+  const fetchNearbyStores = async () => {
+    try {
+      setLoadingLocation(true);
+      
+      // Request location permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Location permission denied');
+        return;
+      }
+
+      // Get current location
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      // Fetch nearby stores from API
+      const response = await api.getNearbyStores(
+        location.coords.latitude,
+        location.coords.longitude,
+        0.5 // 0.5 mile radius
+      );
+
+      if (response.stores && response.stores.length > 0) {
+        // Get the closest store
+        setNearbyStore(response.stores[0]);
+      } else {
+        setNearbyStore(null);
+      }
+    } catch (error) {
+      console.error('Error fetching nearby stores:', error);
+      // Fall back to no nearby store
+      setNearbyStore(null);
+    } finally {
+      setLoadingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    // Fetch nearby stores on mount
+    fetchNearbyStores();
   }, []);
 
   const getGreeting = () => {
@@ -60,13 +107,15 @@ export default function Home() {
         </View>
 
         {/* Nearby Store Banner */}
-        {showNearbyStore && (
+        {nearbyStore && (
           <View style={styles.nearbyBanner}>
             <View style={styles.nearbyContent}>
               <Ionicons name="location" size={24} color="#FFFFFF" />
               <View style={styles.nearbyText}>
-                <Text style={styles.nearbyStore}>Kroger</Text>
-                <Text style={styles.nearbyLabel}>Nearby</Text>
+                <Text style={styles.nearbyStore}>{nearbyStore.retailer}</Text>
+                <Text style={styles.nearbyLabel}>
+                  Nearby · {nearbyStore.distance} mi away
+                </Text>
               </View>
             </View>
             <TouchableOpacity

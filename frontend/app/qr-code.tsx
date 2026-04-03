@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import * as Brightness from 'expo-brightness';
 import { Logo } from '../components/Logo';
-import { createVisitSession } from '../lib/database';
+import { api } from '../lib/api';
 
 export default function QRCodeScreen() {
   const router = useRouter();
@@ -24,16 +24,11 @@ export default function QRCodeScreen() {
   const [loading, setLoading] = useState(true);
   const [originalBrightness, setOriginalBrightness] = useState(0.5);
   const [expanded, setExpanded] = useState(false);
+  const [sessionData, setSessionData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock data for demonstration
+  // Detected store (in production, this would come from GPS/location services)
   const storeName = 'Kroger';
-  const estimatedSavings = 47.50;
-  const couponCount = 12;
-  const expiresInHours = 5;
-  const expiresInMinutes = 42;
-
-  // QR Code data
-  const qrData = `scansavvy://redeem?store=${storeName.toLowerCase()}&session=demo2024&user=${user?.name || 'demo'}`;
 
   useEffect(() => {
     // Save original brightness and set to max
@@ -52,20 +47,28 @@ export default function QRCodeScreen() {
 
     setupBrightness();
 
-    // Simulate loading coupons
-    const timer = setTimeout(async () => {
-      setLoading(false);
-      
-      // Save visit session to database when QR code is generated
-      if (user) {
-        try {
-          await createVisitSession(user.id, storeName, estimatedSavings, couponCount);
-          console.log('Visit session saved to database');
-        } catch (error) {
-          console.error('Error saving visit session:', error);
-        }
+    // Create QR session via API
+    const createSession = async () => {
+      if (!user) {
+        setError('User not authenticated');
+        setLoading(false);
+        return;
       }
-    }, 2500);
+
+      try {
+        setLoading(true);
+        const session = await api.createSession(user.id, storeName);
+        setSessionData(session);
+        console.log('QR session created:', session);
+      } catch (error: any) {
+        console.error('Error creating session:', error);
+        setError(error.message || 'Failed to create QR session');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const timer = setTimeout(createSession, 2500);
 
     return () => {
       clearTimeout(timer);
@@ -106,6 +109,32 @@ export default function QRCodeScreen() {
     );
   }
 
+  if (error || !sessionData) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="close" size={28} color={Colors.navy} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.loadingContainer}>
+          <Ionicons name="alert-circle" size={64} color={Colors.hotBadgeText} />
+          <Text style={styles.errorText}>{error || 'Failed to generate QR code'}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => router.back()}>
+            <Text style={styles.retryButtonText}>Go Back</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Calculate expiration time remaining
+  const expiresAt = new Date(sessionData.expiresAt);
+  const now = new Date();
+  const diffMs = expiresAt.getTime() - now.getTime();
+  const expiresInHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const expiresInMinutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -132,15 +161,15 @@ export default function QRCodeScreen() {
           <Text style={styles.weekLabel}>Week of {getCurrentWeek()}</Text>
 
           <View style={styles.qrCodeContainer}>
-            <QRCode value={qrData} size={220} />
+            <QRCode value={sessionData.qrToken} size={220} />
           </View>
 
           <View style={styles.divider} />
 
-          <Text style={styles.savingsAmount}>${estimatedSavings.toFixed(2)}</Text>
+          <Text style={styles.savingsAmount}>${sessionData.estimatedSavings.toFixed(2)}</Text>
           <Text style={styles.savingsLabel}>estimated savings</Text>
           <Text style={styles.couponInfo}>
-            {couponCount} coupons · 1 store
+            {sessionData.couponCount} coupons · 1 store
           </Text>
         </View>
 
@@ -226,6 +255,25 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: Typography.body,
     color: Colors.subtext,
+  },
+  errorText: {
+    fontSize: Typography.body,
+    color: Colors.hotBadgeText,
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 24,
+    paddingHorizontal: 40,
+  },
+  retryButton: {
+    backgroundColor: Colors.navy,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 50,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: Typography.weightBold,
   },
   qrCard: {
     backgroundColor: '#FFFFFF',

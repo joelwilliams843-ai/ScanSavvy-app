@@ -39,55 +39,39 @@ router.get('/nearby', async (req, res) => {
       return res.status(400).json({ error: 'Invalid coordinates or radius' });
     }
 
-    // Mock store locations (in production, query store_locations table)
-    const mockStores = [
-      {
-        id: '1',
-        retailer: 'Kroger',
-        storeName: 'Kroger - Main Street',
-        address: '123 Main St, Columbus, OH 43215',
-        lat: 39.9612,
-        lng: -82.9988,
-      },
-      {
-        id: '2',
-        retailer: 'Target',
-        storeName: 'Target - Downtown',
-        address: '456 High St, Columbus, OH 43215',
-        lat: 39.9642,
-        lng: -83.0007,
-      },
-      {
-        id: '3',
-        retailer: 'Walmart',
-        storeName: 'Walmart Supercenter',
-        address: '789 Broad St, Columbus, OH 43215',
-        lat: 39.9580,
-        lng: -82.9950,
-      },
-      {
-        id: '4',
-        retailer: 'CVS',
-        storeName: 'CVS Pharmacy #2341',
-        address: '321 Oak Ave, Columbus, OH 43215',
-        lat: 39.9670,
-        lng: -83.0020,
-      },
-      {
-        id: '5',
-        retailer: 'Walgreens',
-        storeName: 'Walgreens #5678',
-        address: '654 Elm St, Columbus, OH 43215',
-        lat: 39.9600,
-        lng: -82.9900,
-      },
-    ];
+    // Query all stores from database
+    const { data: stores, error } = await supabase
+      .from('store_locations')
+      .select('*');
+
+    if (error) throw error;
+
+    // If no stores in database, return empty array
+    if (!stores || stores.length === 0) {
+      return res.json({
+        stores: [],
+        count: 0,
+        searchRadius,
+        userLocation: { lat: userLat, lng: userLng },
+      });
+    }
 
     // Calculate distance for each store and filter by radius
-    const nearbyStores = mockStores
+    const nearbyStores = stores
       .map(store => {
-        const distance = calculateDistance(userLat, userLng, store.lat, store.lng);
-        return { ...store, distance: parseFloat(distance.toFixed(2)) };
+        const distance = calculateDistance(userLat, userLng, store.latitude, store.longitude);
+        return {
+          id: store.id,
+          retailer: store.retailer,
+          storeName: store.store_name,
+          address: store.address,
+          city: store.city,
+          state: store.state,
+          zip: store.zip,
+          lat: parseFloat(store.latitude),
+          lng: parseFloat(store.longitude),
+          distance: parseFloat(distance.toFixed(2)),
+        };
       })
       .filter(store => store.distance <= searchRadius)
       .sort((a, b) => a.distance - b.distance);
