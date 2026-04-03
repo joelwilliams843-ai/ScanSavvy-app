@@ -36,8 +36,8 @@ export default function Signup() {
     try {
       await signup(email, password, name);
       router.replace('/link-stores');
-    } catch (error) {
-      alert('Signup failed. Please try again.');
+    } catch (error: any) {
+      alert(error.message || 'Signup failed. Please try again.');
     } finally {
       setLoading(false);
     }

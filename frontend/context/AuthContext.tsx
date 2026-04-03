@@ -1,8 +1,21 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { MOCK_USER, MOCK_STORES, Store, MOCK_COUPONS, Coupon } from '../constants/MockData';
+import { supabase } from '../lib/supabase';
+import { Session } from '@supabase/supabase-js';
+import { MOCK_STORES, Store } from '../constants/MockData';
+import {
+  getProfile,
+  createProfile,
+  getLoyaltyAccounts,
+  upsertLoyaltyAccount,
+  getClippedCoupons,
+  clipCoupon,
+  unclipCoupon,
+  getTotalSavings,
+  LoyaltyAccount,
+} from '../lib/database';
 
 interface User {
+  id: string;
   name: string;
   email: string;
   totalSaved: number;
@@ -11,136 +24,273 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
+  session: Session | null;
   isAuthenticated: boolean;
   hasCompletedOnboarding: boolean;
   stores: Store[];
   clippedCoupons: string[];
+  loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   completeOnboarding: () => void;
-  updateLinkedStores: (stores: Store[]) => void;
-  toggleCoupon: (couponId: string) => void;
-  updateUserName: (name: string) => void;
+  updateLinkedStores: (stores: Store[]) => Promise<void>;
+  toggleCoupon: (couponId: string) => Promise<void>;
+  updateUserName: (name: string) => Promise<void>;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [stores, setStores] = useState<Store[]>(MOCK_STORES);
   const [clippedCoupons, setClippedCoupons] = useState<string[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
+  // Initialize auth state
   useEffect(() => {
-    loadUserData();
+    // Check active sessions
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        loadUserData(session.user.id, session.user.email || '');
+      } else {
+        setLoading(false);
+      }
+    });
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        loadUserData(session.user.id, session.user.email || '');
+      } else {
+        setUser(null);
+        setStores(MOCK_STORES);
+        setClippedCoupons([]);
+        setHasCompletedOnboarding(false);
+        setLoading(false);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const loadUserData = async () => {
+  const loadUserData = async (userId: string, email: string) => {
     try {
-      const userData = await AsyncStorage.getItem('user');
-      const onboardingData = await AsyncStorage.getItem('hasCompletedOnboarding');
-      const storesData = await AsyncStorage.getItem('stores');
-      const clippedData = await AsyncStorage.getItem('clippedCoupons');
+      // Get profile
+      const profile = await getProfile(userId);
       
-      if (userData) {
-        setUser(JSON.parse(userData));
-      }
-      if (onboardingData) {
-        setHasCompletedOnboarding(JSON.parse(onboardingData));
-      }
-      if (storesData) {
-        setStores(JSON.parse(storesData));
-      }
-      if (clippedData) {
-        setClippedCoupons(JSON.parse(clippedData));
+      // Get loyalty accounts
+      const loyaltyAccounts = await getLoyaltyAccounts(userId);
+      
+      // Get clipped coupons
+      const clipped = await getClippedCoupons(userId);
+      
+      // Get total savings
+      const totalSaved = await getTotalSavings(userId);
+
+      // Map loyalty accounts to stores
+      const updatedStores = MOCK_STORES.map(store => {
+        const account = loyaltyAccounts.find(acc => acc.store_name === store.name);
+        return {
+          ...store,
+          connected: account?.connected || false,
+        };
+      });
+
+      // Get linked store names
+      const linkedStores = loyaltyAccounts
+        .filter(acc => acc.connected)
+        .map(acc => acc.store_name);
+
+      setUser({
+        id: userId,
+        name: profile?.name || 'User',
+        email: profile?.email || email,
+        totalSaved,
+        linkedStores,
+      });
+
+      setStores(updatedStores);
+      setClippedCoupons(clipped);
+      
+      // If user has linked stores, they've completed onboarding
+      if (linkedStores.length > 0) {
+        setHasCompletedOnboarding(true);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
     } finally {
-      setIsLoading(false);
+      setLoading(false);
+    }
+  };
+
+  const refreshUserData = async () => {
+    if (session?.user) {
+      await loadUserData(session.user.id, session.user.email || '');
+    }
+  };
+
+  const signup = async (email: string, password: string, name: string) => {
+    setLoading(true);
+    try {
+      // Sign up with Supabase auth
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        // Create profile
+        await createProfile(data.user.id, name, email);
+        
+        // Initialize default stores in database (all disconnected)
+        for (const store of MOCK_STORES) {
+          await upsertLoyaltyAccount(data.user.id, store.name, store.loyaltyProgram, false);
+        }
+
+        // Load user data
+        await loadUserData(data.user.id, email);
+      }
+    } catch (error: any) {
+      console.error('Signup error:', error);
+      throw new Error(error.message || 'Signup failed');
+    } finally {
+      setLoading(false);
     }
   };
 
   const login = async (email: string, password: string) => {
-    // Mock login - in real app, this would call an API
-    const mockUser = { ...MOCK_USER, email };
-    setUser(mockUser);
-    await AsyncStorage.setItem('user', JSON.stringify(mockUser));
-  };
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-  const signup = async (email: string, password: string, name: string) => {
-    // Mock signup - in real app, this would call an API
-    const newUser = {
-      name,
-      email,
-      totalSaved: 0,
-      linkedStores: [],
-    };
-    setUser(newUser);
-    await AsyncStorage.setItem('user', JSON.stringify(newUser));
+      if (error) throw error;
+
+      if (data.user) {
+        await loadUserData(data.user.id, email);
+      }
+    } catch (error: any) {
+      console.error('Login error:', error);
+      throw new Error(error.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = async () => {
-    setUser(null);
-    setHasCompletedOnboarding(false);
-    setStores(MOCK_STORES);
-    setClippedCoupons([]);
-    await AsyncStorage.multiRemove(['user', 'hasCompletedOnboarding', 'stores', 'clippedCoupons']);
+    setLoading(true);
+    try {
+      await supabase.auth.signOut();
+      setUser(null);
+      setSession(null);
+      setStores(MOCK_STORES);
+      setClippedCoupons([]);
+      setHasCompletedOnboarding(false);
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const completeOnboarding = async () => {
+  const completeOnboarding = () => {
     setHasCompletedOnboarding(true);
-    await AsyncStorage.setItem('hasCompletedOnboarding', JSON.stringify(true));
   };
 
   const updateLinkedStores = async (updatedStores: Store[]) => {
-    setStores(updatedStores);
-    await AsyncStorage.setItem('stores', JSON.stringify(updatedStores));
-    
-    // Update user's linked stores
-    if (user) {
+    if (!user) return;
+
+    setLoading(true);
+    try {
+      // Update each store in database
+      for (const store of updatedStores) {
+        await upsertLoyaltyAccount(
+          user.id,
+          store.name,
+          store.loyaltyProgram,
+          store.connected
+        );
+      }
+
+      // Update local state
+      setStores(updatedStores);
+
+      // Update user's linked stores
       const linkedStoreNames = updatedStores
         .filter(s => s.connected)
         .map(s => s.name);
-      const updatedUser = { ...user, linkedStores: linkedStoreNames };
-      setUser(updatedUser);
-      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+
+      setUser({
+        ...user,
+        linkedStores: linkedStoreNames,
+      });
+    } catch (error) {
+      console.error('Error updating linked stores:', error);
+      throw error;
+    } finally {
+      setLoading(false);
     }
   };
 
   const toggleCoupon = async (couponId: string) => {
-    let updated: string[];
-    if (clippedCoupons.includes(couponId)) {
-      updated = clippedCoupons.filter(id => id !== couponId);
-    } else {
-      updated = [...clippedCoupons, couponId];
+    if (!user) return;
+
+    try {
+      if (clippedCoupons.includes(couponId)) {
+        // Unclip
+        await unclipCoupon(user.id, couponId);
+        setClippedCoupons(prev => prev.filter(id => id !== couponId));
+      } else {
+        // Clip
+        await clipCoupon(user.id, couponId);
+        setClippedCoupons(prev => [...prev, couponId]);
+      }
+    } catch (error) {
+      console.error('Error toggling coupon:', error);
+      throw error;
     }
-    setClippedCoupons(updated);
-    await AsyncStorage.setItem('clippedCoupons', JSON.stringify(updated));
   };
 
   const updateUserName = async (name: string) => {
-    if (user) {
-      const updatedUser = { ...user, name };
-      setUser(updatedUser);
-      await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+    if (!user) return;
+
+    try {
+      // Update profile in database
+      await supabase
+        .from('profiles')
+        .update({ name })
+        .eq('id', user.id);
+
+      // Update local state
+      setUser({ ...user, name });
+    } catch (error) {
+      console.error('Error updating user name:', error);
+      throw error;
     }
   };
-
-  if (isLoading) {
-    return null; // Or a loading spinner
-  }
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        isAuthenticated: !!user,
+        session,
+        isAuthenticated: !!session,
         hasCompletedOnboarding,
         stores,
         clippedCoupons,
+        loading,
         login,
         signup,
         logout,
@@ -148,6 +298,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         updateLinkedStores,
         toggleCoupon,
         updateUserName,
+        refreshUserData,
       }}
     >
       {children}

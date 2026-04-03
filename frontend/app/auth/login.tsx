@@ -34,8 +34,8 @@ export default function Login() {
     try {
       await login(email, password);
       router.replace('/(tabs)/home');
-    } catch (error) {
-      alert('Login failed. Please try again.');
+    } catch (error: any) {
+      alert(error.message || 'Login failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }

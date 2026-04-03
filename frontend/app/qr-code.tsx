@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'react-native-qrcode-svg';
 import * as Brightness from 'expo-brightness';
 import { Logo } from '../components/Logo';
+import { createVisitSession } from '../lib/database';
 
 export default function QRCodeScreen() {
   const router = useRouter();
@@ -52,8 +53,18 @@ export default function QRCodeScreen() {
     setupBrightness();
 
     // Simulate loading coupons
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       setLoading(false);
+      
+      // Save visit session to database when QR code is generated
+      if (user) {
+        try {
+          await createVisitSession(user.id, storeName, estimatedSavings, couponCount);
+          console.log('Visit session saved to database');
+        } catch (error) {
+          console.error('Error saving visit session:', error);
+        }
+      }
     }, 2500);
 
     return () => {
@@ -61,7 +72,7 @@ export default function QRCodeScreen() {
       // Restore original brightness
       Brightness.setBrightnessAsync(originalBrightness);
     };
-  }, []);
+  }, [user]);
 
   const getCurrentWeek = () => {
     const now = new Date();
